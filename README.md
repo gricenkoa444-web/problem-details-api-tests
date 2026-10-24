@@ -29,10 +29,10 @@ OpenAPI-спецификация метода приёмки маркирова�
 
 ## Структура
 
-- `openapi.yaml`: спецификация API
+- `openapi/problemapi.yaml`: спецификация API
 
 ## Валидация
 
 ```bash
-npx @redocly/cli lint openapi.yaml
+npx @redocly/cli lint openapi/problemapi.yaml
 ```
