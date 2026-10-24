@@ -1,7 +1,112 @@
+openapi: 3.0.3
+info:
+  title: Delivery Acceptance API
+  version: 1.0.0
+
+paths:
+  /deliveries/{deliveryId}/acceptance:
+    post:
+      operationId: acceptDelivery
+      summary: Приёмка маркированной поставки
+      tags: [Deliveries]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deliveryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >
+            Уникальный ключ оперции (UUID), генерируется клиентом.
+            Повторный запрос с тем же ключом в течение 24 часов возвращает
+            результат первого вызова.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptanceRequest'
+      responses:
+        '200':
+          description: Поставка принята
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptanceResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
   schemas:
+    AcceptanceRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [markingCode, quantity]
+            properties:
+              markingCode:
+                type: string
+              quantity:
+                type: integer
+                minimum: 1
+
+    AcceptanceResult:
+      type: object
+      required: [deliveryId, status]
+      properties:
+        deliveryId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACCEPTED]
+
+    Violation:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          example: items[0].markingCode
+        message:
+          type: string
+          example: Код маркировки имеет неверный формат
+
     Problem:
       type: object
+      description: Описание ошибки по RFC 7807 (Problem Details) с расширениями
       required: [type, title, status]
       properties:
         type:
@@ -13,52 +118,94 @@ components:
           example: Поставка уже принята
         status:
           type: integer
-          example: 409
+          minimum: 400
+          maximum: 599
         detail:
           type: string
         instance:
           type: string
-          example: /deliveries/3f2a.../acceptance
+          format: uri-reference
+          example: /deliveries/3f2b8c1e-0000-0000-0000-000000000000/acceptance
         reason:
           type: string
+          description: Машиночитаемая причина ошибки
           enum:
-            - ALREADY_ACCEPTED
-            - REQUEST_IN_PROGRESS
-            - GTIN_COUNT_MISMATCH
-            - IDEMPOTENCY_KEY_REUSED
-            - OTHER
-        errors:
+            - INVALID_REQUEST_BODY
+            - INVALID_MARKING_CODE
+            - TOKEN_MISSING_OR_EXPIRED
+            - INSUFFICIENT_PERMISSIONS
+            - DELIVERY_NOT_FOUND
+            - DELIVERY_ALREADY_ACCEPTED
+            - DELIVERY_CANCELLED
+            - QUANTITY_MISMATCH
+            - MARKING_CODE_NOT_IN_DELIVERY
+            - RATE_LIMIT_EXCEEDED
+            - SERVICE_UNAVAILABLE
+        violations:
           type: array
           items:
-            type: object
-            properties:
-              field: { type: string }
-              message: { type: string }
+            $ref: '#/components/schemas/Violation'
+
+  headers:
+    RetryAfter:
+      description: Через сколько секунд можно повторить запрос
+      required: true
+      schema:
+        type: integer
+        minimum: 0
+        example: 30
 
   responses:
-    Conflict:
-      description: >
-        Состояние ресурса не допускает операцию: поставка уже принята
-        (ALREADY_ACCEPTED) либо запрос с тем же ключом ещё
-        обрабатывается (REQUEST_IN_PROGRESS).
+    BadRequest:
+      description: Некорректный запрос (структура или формат данных)
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
-          example:
-            type: https://api.example.com/problems/delivery-already-accepted
-            title: Поставка уже принята
-            status: 409
-            reason: ALREADY_ACCEPTED
-
+    Unauthorized:
+      description: Токен отсутствует, недействителен или истёк
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Недостаточно прав для приёмки поставки
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Поставка не найдена
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Конфликт состояния (поставка уже принята или отменена)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: Запрос корректен синтаксически, но нарушает бизнес-правила
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
     TooManyRequests:
-      description: Превышен лимит запросов.
+      description: Превышен лимит запросов
       headers:
         Retry-After:
-          description: Через сколько секунд можно повторить запрос.
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/problem+json:
           schema:
-            type: integer
-            minimum: 0
+            $ref: '#/components/schemas/Problem'
+    ServiceUnavailable:
+      description: Сервис временно недоступен
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
       content:
         application/problem+json:
           schema:
