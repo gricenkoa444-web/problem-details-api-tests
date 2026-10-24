@@ -1,0 +1,65 @@
+components:
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          example: https://api.example.com/problems/delivery-already-accepted
+        title:
+          type: string
+          example: Поставка уже принята
+        status:
+          type: integer
+          example: 409
+        detail:
+          type: string
+        instance:
+          type: string
+          example: /deliveries/3f2a.../acceptance
+        reason:
+          type: string
+          enum:
+            - ALREADY_ACCEPTED
+            - REQUEST_IN_PROGRESS
+            - GTIN_COUNT_MISMATCH
+            - IDEMPOTENCY_KEY_REUSED
+            - OTHER
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+  responses:
+    Conflict:
+      description: >
+        Состояние ресурса не допускает операцию: поставка уже принята
+        (ALREADY_ACCEPTED) либо запрос с тем же ключом ещё
+        обрабатывается (REQUEST_IN_PROGRESS).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://api.example.com/problems/delivery-already-accepted
+            title: Поставка уже принята
+            status: 409
+            reason: ALREADY_ACCEPTED
+
+    TooManyRequests:
+      description: Превышен лимит запросов.
+      headers:
+        Retry-After:
+          description: Через сколько секунд можно повторить запрос.
+          schema:
+            type: integer
+            minimum: 0
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
